@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { Navigation, Star, Map, List, Calculator, X, Fuel } from "lucide-react";
+import { Star, Map, List, Calculator, X, Fuel } from "lucide-react";
 
-// Leaflet loaded via CDN in useEffect
 let L = null;
 
 export default function Home() {
@@ -13,13 +12,12 @@ export default function Home() {
   const [userLocation, setUserLocation] = useState(null);
   const [fuelType, setFuelType] = useState("Precio Gasolina 95 E5");
   const [favorites, setFavorites] = useState([]);
-  const [view, setView] = useState("list"); // list | map | calc
+  const [view, setView] = useState("list");
   const [showCalc, setShowCalc] = useState(false);
   const [calcLiters, setCalcLiters] = useState(50);
   const [calcFreq, setCalcFreq] = useState(2);
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
-  const markersRef = useRef([]);
 
   // Load favorites & stations
   useEffect(() => {
@@ -55,7 +53,33 @@ export default function Home() {
     }
   }, []);
 
-  // Load Leaflet via CDN
+  // Filtered & sorted stations — defined BEFORE the map useEffect
+  const filteredStations = useMemo(() => {
+    let list = stations.filter((s) => {
+      const label = (s["Rótulo"] || "").toLowerCase();
+      const muni = (s["Municipio"] || "").toLowerCase();
+      const q = search.toLowerCase();
+      return label.includes(q) || muni.includes(q);
+    });
+
+    if (userLocation) {
+      list = list.map((s) => {
+        const lat = parseFloat((s.latitud || s.Latitud || "").toString().replace(",", "."));
+        const lng = parseFloat((s["longitud (wgs84)"] || s.Longitud || s.longitud || "").toString().replace(",", "."));
+        if (isNaN(lat) || isNaN(lng)) return { ...s, _dist: Infinity };
+        const d = Math.sqrt(
+          Math.pow((lat - userLocation.lat) * 111, 2) +
+            Math.pow((lng - userLocation.lng) * 111 * Math.cos((userLocation.lat * Math.PI) / 180), 2)
+        );
+        return { ...s, _dist: d };
+      });
+      list.sort((a, b) => a._dist - b._dist);
+    }
+
+    return list;
+  }, [stations, search, userLocation]);
+
+  // Load Leaflet via CDN — AFTER filteredStations is defined
   useEffect(() => {
     if (view !== "map") return;
     if (typeof window === "undefined") return;
@@ -83,6 +107,7 @@ export default function Home() {
     };
 
     loadLeaflet();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, filteredStations]);
 
   const initMap = () => {
@@ -115,7 +140,6 @@ export default function Home() {
         .bindPopup("Tu ubicación");
     }
 
-    markersRef.current = [];
     filteredStations.forEach((s) => {
       const lat = parseFloat((s.latitud || s.Latitud || "").toString().replace(",", "."));
       const lng = parseFloat((s["longitud (wgs84)"] || s.Longitud || s.longitud || "").toString().replace(",", "."));
@@ -124,7 +148,7 @@ export default function Home() {
       const price = parseFloat((s[fuelType] || "").toString().replace(",", "."));
       const isFav = favorites.includes(s["IDEESS"]);
 
-      const marker = L.marker([lat, lng])
+      L.marker([lat, lng])
         .addTo(map)
         .bindPopup(
           `<div style="font-family:sans-serif;min-width:140px">
@@ -134,35 +158,8 @@ export default function Home() {
             ${isFav ? '<br/><span style="color:#f59e0b">★ Favorita</span>' : ""}
           </div>`
         );
-      markersRef.current.push(marker);
     });
   };
-
-  // Filtered & sorted stations
-  const filteredStations = useMemo(() => {
-    let list = stations.filter((s) => {
-      const label = (s["Rótulo"] || "").toLowerCase();
-      const muni = (s["Municipio"] || "").toLowerCase();
-      const q = search.toLowerCase();
-      return label.includes(q) || muni.includes(q);
-    });
-
-    if (userLocation) {
-      list = list.map((s) => {
-        const lat = parseFloat((s.latitud || s.Latitud || "").toString().replace(",", "."));
-        const lng = parseFloat((s["longitud (wgs84)"] || s.Longitud || s.longitud || "").toString().replace(",", "."));
-        if (isNaN(lat) || isNaN(lng)) return { ...s, _dist: Infinity };
-        const d = Math.sqrt(
-          Math.pow((lat - userLocation.lat) * 111, 2) +
-            Math.pow((lng - userLocation.lng) * 111 * Math.cos((userLocation.lat * Math.PI) / 180), 2)
-        );
-        return { ...s, _dist: d };
-      });
-      list.sort((a, b) => a._dist - b._dist);
-    }
-
-    return list;
-  }, [stations, search, userLocation, fuelType]);
 
   const toggleFavorite = (id) => {
     const updated = favorites.includes(id)
@@ -188,8 +185,7 @@ export default function Home() {
 
   const calcSaving = () => {
     if (!cheapestPrice || !avgPrice) return null;
-    const saving = (avgPrice - cheapestPrice) * calcLiters * calcFreq * 52;
-    return saving.toFixed(2);
+    return ((avgPrice - cheapestPrice) * calcLiters * calcFreq * 52).toFixed(2);
   };
 
   return (
@@ -217,7 +213,6 @@ export default function Home() {
             outline: "none",
           }}
         />
-        {/* Fuel type selector */}
         <select
           value={fuelType}
           onChange={(e) => setFuelType(e.target.value)}
@@ -257,9 +252,7 @@ export default function Home() {
           </div>
           <div style={{ flex: 1, textAlign: "center" }}>
             <div style={{ fontSize: 11, color: "#64748b" }}>Estaciones</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#1e3a5f" }}>
-              {filteredStations.length}
-            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#1e3a5f" }}>{filteredStations.length}</div>
           </div>
         </div>
       )}
@@ -273,9 +266,7 @@ export default function Home() {
       ) : view === "list" ? (
         <div>
           {filteredStations.length === 0 ? (
-            <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>
-              No se encontraron gasolineras
-            </div>
+            <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>No se encontraron gasolineras</div>
           ) : (
             filteredStations.map((s, i) => {
               const price = parseFloat((s[fuelType] || "").toString().replace(",", "."));
@@ -297,7 +288,6 @@ export default function Home() {
                     boxShadow: isCheapest ? "0 0 0 2px #16a34a" : "0 1px 4px rgba(0,0,0,0.08)",
                   }}
                 >
-                  {/* Price badge */}
                   <div
                     style={{
                       minWidth: 68,
@@ -314,7 +304,6 @@ export default function Home() {
                     {isCheapest && <div style={{ fontSize: 10, color: "#16a34a", fontWeight: 700 }}>MÁS BARATA</div>}
                   </div>
 
-                  {/* Info */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 15, color: "#1e293b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {s["Rótulo"] || "Gasolinera"}
@@ -330,18 +319,9 @@ export default function Home() {
                     )}
                   </div>
 
-                  {/* Favorite button */}
                   <button
                     onClick={() => toggleFavorite(s["IDEESS"])}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: 6,
-                      borderRadius: 8,
-                      color: isFav ? "#f59e0b" : "#cbd5e1",
-                    }}
-                    aria-label={isFav ? "Quitar favorito" : "Añadir favorito"}
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: 6, borderRadius: 8, color: isFav ? "#f59e0b" : "#cbd5e1" }}
                   >
                     <Star size={22} fill={isFav ? "#f59e0b" : "none"} />
                   </button>
@@ -353,14 +333,11 @@ export default function Home() {
       ) : view === "map" ? (
         <div ref={mapRef} style={{ height: "calc(100vh - 220px)", width: "100%" }} />
       ) : (
-        // Favorites view
         <div>
-          <div style={{ padding: "16px 16px 8px", color: "#64748b", fontSize: 14 }}>
-            Tus gasolineras favoritas
-          </div>
+          <div style={{ padding: "16px 16px 8px", color: "#64748b", fontSize: 14 }}>Tus gasolineras favoritas</div>
           {favorites.length === 0 ? (
             <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>
-              <Star size={40} style={{ marginBottom: 12, opacity: 0.3 }} />
+              <div style={{ fontSize: 40, marginBottom: 12, opacity: 0.3 }}>★</div>
               <p>Aún no tienes favoritas.<br />Pulsa ★ en cualquier gasolinera.</p>
             </div>
           ) : (
@@ -371,35 +348,19 @@ export default function Home() {
                 return (
                   <div
                     key={s["IDEESS"] + i}
-                    style={{
-                      background: "white",
-                      margin: "8px 12px",
-                      borderRadius: 14,
-                      padding: "14px 16px",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 14,
-                      boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-                    }}
+                    style={{ background: "white", margin: "8px 12px", borderRadius: 14, padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}
                   >
                     <div style={{ minWidth: 68, textAlign: "center", background: "#fef9c3", borderRadius: 10, padding: "8px 4px" }}>
-                      <div style={{ fontSize: 17, fontWeight: 800, color: "#b45309" }}>
-                        {!isNaN(price) ? price.toFixed(3) : "—"}
-                      </div>
+                      <div style={{ fontSize: 17, fontWeight: 800, color: "#b45309" }}>{!isNaN(price) ? price.toFixed(3) : "—"}</div>
                       <div style={{ fontSize: 10, color: "#64748b" }}>€/L</div>
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 700, fontSize: 15, color: "#1e293b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {s["Rótulo"] || "Gasolinera"}
                       </div>
-                      <div style={{ fontSize: 13, color: "#64748b", marginTop: 2 }}>
-                        {s["Municipio"] || s.municipio || ""}
-                      </div>
+                      <div style={{ fontSize: 13, color: "#64748b", marginTop: 2 }}>{s["Municipio"] || s.municipio || ""}</div>
                     </div>
-                    <button
-                      onClick={() => toggleFavorite(s["IDEESS"])}
-                      style={{ background: "none", border: "none", cursor: "pointer", padding: 6, color: "#f59e0b" }}
-                    >
+                    <button onClick={() => toggleFavorite(s["IDEESS"])} style={{ background: "none", border: "none", cursor: "pointer", padding: 6, color: "#f59e0b" }}>
                       <Star size={22} fill="#f59e0b" />
                     </button>
                   </div>
@@ -412,14 +373,7 @@ export default function Home() {
       {/* Calculator modal */}
       {showCalc && (
         <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.5)",
-            zIndex: 200,
-            display: "flex",
-            alignItems: "flex-end",
-          }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 200, display: "flex", alignItems: "flex-end" }}
           onClick={() => setShowCalc(false)}
         >
           <div
@@ -436,14 +390,7 @@ export default function Home() {
             <label style={{ display: "block", marginBottom: 16 }}>
               <span style={{ fontSize: 14, color: "#64748b" }}>Litros por repostaje</span>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
-                <input
-                  type="range"
-                  min={10}
-                  max={100}
-                  value={calcLiters}
-                  onChange={(e) => setCalcLiters(Number(e.target.value))}
-                  style={{ flex: 1 }}
-                />
+                <input type="range" min={10} max={100} value={calcLiters} onChange={(e) => setCalcLiters(Number(e.target.value))} style={{ flex: 1 }} />
                 <span style={{ minWidth: 40, fontWeight: 700, color: "#1e3a5f" }}>{calcLiters} L</span>
               </div>
             </label>
@@ -451,14 +398,7 @@ export default function Home() {
             <label style={{ display: "block", marginBottom: 20 }}>
               <span style={{ fontSize: 14, color: "#64748b" }}>Veces por semana que repostas</span>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 6 }}>
-                <input
-                  type="range"
-                  min={1}
-                  max={7}
-                  value={calcFreq}
-                  onChange={(e) => setCalcFreq(Number(e.target.value))}
-                  style={{ flex: 1 }}
-                />
+                <input type="range" min={1} max={7} value={calcFreq} onChange={(e) => setCalcFreq(Number(e.target.value))} style={{ flex: 1 }} />
                 <span style={{ minWidth: 40, fontWeight: 700, color: "#1e3a5f" }}>{calcFreq}x</span>
               </div>
             </label>
@@ -479,20 +419,7 @@ export default function Home() {
       )}
 
       {/* Bottom nav */}
-      <nav
-        style={{
-          position: "fixed",
-          bottom: 0,
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: "100%",
-          maxWidth: 600,
-          background: "white",
-          borderTop: "1px solid #e2e8f0",
-          display: "flex",
-          zIndex: 100,
-        }}
-      >
+      <nav style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 600, background: "white", borderTop: "1px solid #e2e8f0", display: "flex", zIndex: 100 }}>
         {[
           { id: "list", icon: <List size={22} />, label: "Lista" },
           { id: "map", icon: <Map size={22} />, label: "Mapa" },
@@ -523,20 +450,7 @@ export default function Home() {
         ))}
         <button
           onClick={() => setShowCalc(true)}
-          style={{
-            flex: 1,
-            padding: "10px 0",
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            color: "#94a3b8",
-            fontSize: 12,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 3,
-            borderTop: "2px solid transparent",
-          }}
+          style={{ flex: 1, padding: "10px 0", background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, borderTop: "2px solid transparent" }}
         >
           <Calculator size={22} />
           Calcular
