@@ -6,6 +6,9 @@ import { Navigation, Star, Map, List, Calculator, Fuel } from "lucide-react";
 // Leaflet loaded via CDN in useEffect
 let L = null;
 
+// Tamaño del tramo de distancia (km). Dentro de cada tramo se ordena por precio.
+const BAND_KM = 3;
+
 export default function Home() {
   const [search, setSearch] = useState("");
   const [stations, setStations] = useState([]);
@@ -13,7 +16,7 @@ export default function Home() {
   const [userLocation, setUserLocation] = useState(null);
   const [fuelType, setFuelType] = useState("Precio Gasolina 95 E5");
   const [favorites, setFavorites] = useState([]);
-  const [view, setView] = useState("list"); // list | map | calc
+  const [view, setView] = useState("list"); // list | favs | map | calc
   const [calcLiters, setCalcLiters] = useState(50);
   const [calcFreq, setCalcFreq] = useState(2);
   const mapRef = useRef(null);
@@ -59,10 +62,11 @@ export default function Home() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
-  // ORDENACIÓN Híbrida: Prioriza cercanía pero coloca la más barata primero en tu zona
+  // ORDENACIÓN: 1º las más cercanas (por tramos de BAND_KM km), 2º la más barata dentro de cada tramo.
+  // Sin ubicación activa, se ordena solo por precio.
   const filteredStations = useMemo(() => {
     let list = [...stations];
-    
+
     if (search) {
       list = list.filter(
         (s) =>
@@ -71,28 +75,25 @@ export default function Home() {
       );
     }
 
-    list.sort((a, b) => {
-      const precioA = parseFloat(a[fuelType]?.replace(",", ".")) || 9999;
-      const precioB = parseFloat(b[fuelType]?.replace(",", ".")) || 9999;
+    // Calculamos precio y distancia una sola vez por estación
+    const withData = list
+      .map((s) => ({
+        s,
+        price: parseFloat(s[fuelType]?.replace(",", ".")),
+        dist: getDistance(s),
+      }))
+      .filter((x) => !isNaN(x.price)); // fuera las que no tienen ese combustible
 
+    withData.sort((a, b) => {
       if (userLocation) {
-        const distA = getDistance(a) ?? 999;
-        const distB = getDistance(b) ?? 999;
-
-        // Si están en un radio cercano (menos de 10 km entre ellas), el PRECIO manda por completo
-        if (distA <= 15 && distB <= 15) {
-          return precioA - precioB;
-        }
-
-        // Si una está muy lejos comparada con la otra, priorizamos la cercanía
-        return distA - distB;
+        const bandA = Math.floor((a.dist ?? 9999) / BAND_KM);
+        const bandB = Math.floor((b.dist ?? 9999) / BAND_KM);
+        if (bandA !== bandB) return bandA - bandB; // 1º: más cerca
       }
-
-      // Si no hay ubicación activa, ordena puramente por precio de menor a mayor
-      return precioA - precioB;
+      return a.price - b.price; // 2º: más barata
     });
 
-    return list.slice(0, 80);
+    return withData.slice(0, 80).map((x) => x.s);
   }, [search, stations, userLocation, fuelType]);
 
   // Init map when switching to map view
@@ -106,7 +107,7 @@ export default function Home() {
           initMap();
         }
       }, 200);
-      return;
+      return () => clearInterval(interval);
     }
     initMap();
   }, [view, filteredStations]);
@@ -216,7 +217,7 @@ export default function Home() {
             <Navigation size={16} /> ACTIVAR UBICACIÓN
           </button>
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: "#16a34a", textAlign: "center", fontWeight: "bold" }}>🏆 Ordenado por PRECIO (más baratas de tu zona primero)</p>
+          <p style={{ margin: 0, fontSize: 12, color: "#16a34a", textAlign: "center", fontWeight: "bold" }}>📍 Ordenado por CERCANÍA y, dentro de cada tramo, por precio</p>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -247,7 +248,7 @@ export default function Home() {
         {[
           { id: "list", icon: <List size={15} />, label: "Lista" },
           { id: "favs", icon: <Star size={15} />, label: `Favoritos${favorites.length ? ` (${favorites.length})` : ""}` },
-          { id: "map", icon: , label: "Mapa" },
+          { id: "map", icon: <Map size={15} />, label: "Mapa" },
           { id: "calc", icon: <Calculator size={15} />, label: "Ahorro" },
         ].map((tab) => (
           <button
@@ -284,7 +285,7 @@ export default function Home() {
                 const price = parseFloat(s[fuelType]?.replace(",", ".")) || null;
                 const isFav = favorites.includes(s.IDEESS);
                 const dist = getDistance(s);
-                const isCheapest = i === 0;
+                const isCheapest = price !== null && price === minPrice;
 
                 return (
                   <div key={i} style={{ background: "white", borderRadius: 14, padding: "12px 14px", boxShadow: isCheapest ? "0 0 0 2px #22c55e" : "0 1px 4px rgba(0,0,0,0.07)", position: "relative" }}>
