@@ -51,7 +51,7 @@ export default function Home() {
     if (!userLocation) return null;
     const lat = parseFloat(s.Latitud?.replace(",", "."));
     const lng = parseFloat(s["Longitud (WGS84)"]?.replace(",", "."));
-    if (!lat || !lng) return 999;
+    if (!lat || !lng) return null;
     const R = 6371;
     const dLat = ((lat - userLocation.lat) * Math.PI) / 180;
     const dLng = ((lng - userLocation.lng) * Math.PI) / 180;
@@ -59,17 +59,10 @@ export default function Home() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
-  // Filtrado y Ordenación COMBINADA (Cercanía primero + Precio más bajo dentro de la zona)
+  // Filtrado y Ordenación por Cercanía (bloques de 5km) y Precio más bajo
   const filteredStations = useMemo(() => {
     let list = [...stations];
     
-    // 1. Filtrar estaciones que tengan precio válido para el combustible seleccionado
-    list = list.filter((s) => {
-      const p = parseFloat(s[fuelType]?.replace(",", "."));
-      return p && !isNaN(p);
-    });
-
-    // 2. Filtrar por búsqueda de texto (municipio o marca) si se usa
     if (search) {
       list = list.filter(
         (s) =>
@@ -78,7 +71,6 @@ export default function Home() {
       );
     }
 
-    // 3. Ordenación inteligente: Cercanía prioritaria agrupada y menor precio
     list.sort((a, b) => {
       const precioA = parseFloat(a[fuelType]?.replace(",", ".")) || 9999;
       const precioB = parseFloat(b[fuelType]?.replace(",", ".")) || 9999;
@@ -86,18 +78,19 @@ export default function Home() {
       if (userLocation) {
         const distA = getDistance(a);
         const distB = getDistance(b);
+        
+        // Si ambas tienen distancia, agrupamos por cercanía (bloques de 5 km)
+        if (distA !== null && distB !== null) {
+          const bloqueA = Math.floor(distA / 5);
+          const bloqueB = Math.floor(distB / 5);
 
-        // Agrupamos por bloques de cercanía de 8 km
-        const bloqueA = Math.floor(distA / 8);
-        const bloqueB = Math.floor(distB / 8);
-
-        // Si están en diferentes bloques de distancia, prioriza la zona más cercana
-        if (bloqueA !== bloqueB) {
-          return bloqueA - bloqueB;
+          if (bloqueA !== bloqueB) {
+            return bloqueA - bloqueB; // Primero las más cercanas
+          }
         }
       }
 
-      // Dentro del mismo radio cercano, ordena estrictamente de la más barata a la más cara
+      // Si están en el mismo rango de cercanía (o no hay ubicación), ordena de más barata a más cara
       return precioA - precioB;
     });
 
@@ -225,7 +218,7 @@ export default function Home() {
             <Navigation size={16} /> ACTIVAR UBICACIÓN
           </button>
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Ubicación activa (Cercanía + Precio más barato)</p>
+          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Ubicación activa (Cercanía + Mejor precio)</p>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <input
