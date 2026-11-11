@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
-import { Navigation, Star, Map, List, Calculator, X, Fuel } from "lucide-react";
+import { Navigation, Star, Map, List, Calculator, Fuel } from "lucide-react";
 
+// Leaflet loaded via CDN in useEffect
 let L = null;
 
 export default function Home() {
@@ -12,7 +13,7 @@ export default function Home() {
   const [userLocation, setUserLocation] = useState(null);
   const [fuelType, setFuelType] = useState("Precio Gasolina 95 E5");
   const [favorites, setFavorites] = useState([]);
-  const [view, setView] = useState("list");
+  const [view, setView] = useState("list"); // list | map | calc
   const [calcLiters, setCalcLiters] = useState(50);
   const [calcFreq, setCalcFreq] = useState(2);
   const mapRef = useRef(null);
@@ -28,13 +29,10 @@ export default function Home() {
       .then((data) => {
         setStations(data.ListaEESSPrecio || []);
         setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Error:", err);
-        setLoading(false);
       });
   }, []);
 
+  // Load Leaflet CSS + JS
   useEffect(() => {
     if (document.getElementById("leaflet-css")) return;
     const link = document.createElement("link");
@@ -42,6 +40,7 @@ export default function Home() {
     link.rel = "stylesheet";
     link.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";
     document.head.appendChild(link);
+
     const script = document.createElement("script");
     script.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js";
     script.onload = () => { L = window.L; };
@@ -52,7 +51,6 @@ export default function Home() {
     if (!userLocation) return null;
     const lat = parseFloat(s.Latitud?.replace(",", "."));
     const lng = parseFloat(s["Longitud (WGS84)"]?.replace(",", "."));
-    if (isNaN(lat) || isNaN(lng)) return null;
     const R = 6371;
     const dLat = ((lat - userLocation.lat) * Math.PI) / 180;
     const dLng = ((lng - userLocation.lng) * Math.PI) / 180;
@@ -60,21 +58,36 @@ export default function Home() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
+  // Filtrado y Ordenación por PRECIO MÁS BARATO primero
   const filteredStations = useMemo(() => {
     let list = [...stations];
+    
+    // 1. Filtrar estaciones que tengan precio válido para el tipo de combustible seleccionado
+    list = list.filter((s) => {
+      const p = parseFloat(s[fuelType]?.replace(",", "."));
+      return p && !isNaN(p);
+    });
+
+    // 2. Filtrar por término de búsqueda (municipio o marca)
     if (search) {
       list = list.filter(
         (s) =>
           s.Municipio?.toLowerCase().includes(search.toLowerCase()) ||
-          s["Rótulo"]?.toLowerCase().includes(search.toLowerCase())
+          s.Rótulo?.toLowerCase().includes(search.toLowerCase())
       );
     }
-    if (userLocation) {
-      list = list.sort((a, b) => (getDistance(a) || 999) - (getDistance(b) || 999));
-    }
-    return list.slice(0, 80);
-  }, [search, stations, userLocation, fuelType]);
 
+    // 3. Ordenar estrictamente de MENOR a MAYOR PRECIO
+    list.sort((a, b) => {
+      const precioA = parseFloat(a[fuelType]?.replace(",", ".")) || 9999;
+      const precioB = parseFloat(b[fuelType]?.replace(",", ".")) || 9999;
+      return precioA - precioB;
+    });
+
+    return list.slice(0, 80);
+  }, [search, stations, fuelType]);
+
+  // Init map when switching to map view
   useEffect(() => {
     if (view !== "map") return;
     if (!L) {
@@ -92,7 +105,11 @@ export default function Home() {
 
   function initMap() {
     if (!mapRef.current || !L) return;
-    const center = userLocation ? [userLocation.lat, userLocation.lng] : [40.416775, -3.70379];
+
+    const center = userLocation
+      ? [userLocation.lat, userLocation.lng]
+      : [40.416775, -3.70379];
+
     if (!mapInstanceRef.current) {
       mapInstanceRef.current = L.map(mapRef.current).setView(center, userLocation ? 12 : 6);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -101,28 +118,37 @@ export default function Home() {
     } else {
       mapInstanceRef.current.setView(center, userLocation ? 12 : 6);
     }
+
+    // Clear old markers
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
-    const prices = filteredStations.map((s) => parseFloat(s[fuelType]?.replace(",", ".")) || null).filter(Boolean);
+
+    const prices = filteredStations
+      .map((s) => parseFloat(s[fuelType]?.replace(",", ".")) || null)
+      .filter(Boolean);
     const minP = Math.min(...prices);
     const maxP = Math.max(...prices);
+
     filteredStations.slice(0, 100).forEach((s) => {
       const lat = parseFloat(s.Latitud?.replace(",", "."));
       const lng = parseFloat(s["Longitud (WGS84)"]?.replace(",", "."));
       if (!lat || !lng) return;
+
       const price = parseFloat(s[fuelType]?.replace(",", ".")) || null;
       const ratio = price ? (price - minP) / (maxP - minP || 1) : 0.5;
       const r = Math.round(ratio * 200);
       const g = Math.round((1 - ratio) * 180);
       const color = `rgb(${r},${g},40)`;
+
       const icon = L.divIcon({
         html: `<div style="background:${color};color:white;font-size:10px;font-weight:bold;padding:3px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3)">${price ? price.toFixed(3) + "€" : "?"}</div>`,
         className: "",
         iconAnchor: [20, 10],
       });
+
       const marker = L.marker([lat, lng], { icon })
         .addTo(mapInstanceRef.current)
-        .bindPopup(`<b>${s["Rótulo"]}</b><br>${s.Municipio}<br><a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}" target="_blank">🗺 Ir ahora</a>`);
+        .bindPopup(`<b>${s.Rótulo}</b><br>${s.Municipio}<br><a href="https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}" target="_blank">🗺 Ir ahora</a>`);
       markersRef.current.push(marker);
     });
   }
@@ -135,8 +161,12 @@ export default function Home() {
     });
   };
 
-  const favStations = useMemo(() => stations.filter((s) => favorites.includes(s.IDEESS)), [stations, favorites]);
+  const favStations = useMemo(
+    () => stations.filter((s) => favorites.includes(s.IDEESS)),
+    [stations, favorites]
+  );
 
+  // Calc savings
   const prices = filteredStations.map((s) => parseFloat(s[fuelType]?.replace(",", ".")) || null).filter(Boolean);
   const minPrice = prices.length ? Math.min(...prices) : null;
   const maxPrice = prices.length ? Math.max(...prices) : null;
@@ -154,12 +184,7 @@ export default function Home() {
     }
   };
 
-  const fuelLabel = {
-    "Precio Gasolina 95 E5": "Gasolina 95 E5",
-    "Precio Gasoleo A": "Gasóleo A",
-    "Precio Gasolina 98 E5": "Gasolina 98 E5",
-    "Precio Gasoleo Premium": "Gasóleo Premium",
-  }[fuelType] || fuelType;
+  const fuelLabel = fuelType === "Precio Gasolina 95 E5" ? "Gasolina 95 E5" : "Gasóleo A";
 
   return (
     <div style={{ fontFamily: "'Segoe UI', sans-serif", minHeight: "100vh", background: "#f0f4f8", paddingBottom: 80 }}>
@@ -183,7 +208,7 @@ export default function Home() {
             <Navigation size={16} /> ACTIVAR UBICACIÓN
           </button>
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Ordenado por distancia</p>
+          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Ubicación activada (Ordenado por precio)</p>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -198,10 +223,10 @@ export default function Home() {
             style={{ padding: "10px 8px", border: "1px solid #e2e8f0", borderRadius: 10, fontSize: 13, background: "white", cursor: "pointer" }}
           >
             <option value="Precio Gasolina 95 E5">95 E5</option>
-            <option value="Precio Gasolina 95 E10">95 E10</option>
-            <option value="Precio Gasolina 95 E5 Premium">95 Premium</option>
-            <option value="Precio Gasolina 98 E5">98 E5</option>
-            <option value="Precio Gasolina 98 E10">98 E10</option>
+            <option value="Precio Gasolina 95 E10">Gasolina 95 E10</option>
+            <option value="Precio Gasolina 95 E5 Premium">Gasolina 95 Premium</option>
+            <option value="Precio Gasolina 98 E5">Gasolina 98 E5</option>
+            <option value="Precio Gasolina 98 E10">Gasolina 98 E10</option>
             <option value="Precio Gasoleo A">Gasóleo A</option>
             <option value="Precio Gasoleo B">Gasóleo B</option>
             <option value="Precio Gasoleo Premium">Gasóleo Premium</option>
@@ -214,7 +239,7 @@ export default function Home() {
         {[
           { id: "list", icon: <List size={15} />, label: "Lista" },
           { id: "favs", icon: <Star size={15} />, label: `Favoritos${favorites.length ? ` (${favorites.length})` : ""}` },
-          { id: "map", icon: <Map size={15} />, label: "Mapa" },
+          { id: "map", icon: , label: "Mapa" },
           { id: "calc", icon: <Calculator size={15} />, label: "Ahorro" },
         ].map((tab) => (
           <button
@@ -230,7 +255,8 @@ export default function Home() {
               marginBottom: -2,
             }}
           >
-            {tab.icon}{tab.label}
+            {tab.icon}
+            {tab.label}
           </button>
         ))}
       </div>
@@ -238,13 +264,10 @@ export default function Home() {
       {/* Content */}
       <div style={{ padding: "12px 16px" }}>
 
-        {/* LIST */}
+        {/* LIST VIEW */}
         {view === "list" && (
           loading ? (
-            <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>⛽</div>
-              Cargando estaciones...
-            </div>
+            <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>Cargando estaciones...</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {filteredStations.map((s, i) => {
@@ -253,7 +276,8 @@ export default function Home() {
                 const price = parseFloat(s[fuelType]?.replace(",", ".")) || null;
                 const isFav = favorites.includes(s.IDEESS);
                 const dist = getDistance(s);
-                const isCheapest = price && price === minPrice;
+                const isCheapest = i === 0; // Al estar ordenado, la primera siempre es la más barata
+
                 return (
                   <div key={i} style={{ background: "white", borderRadius: 14, padding: "12px 14px", boxShadow: isCheapest ? "0 0 0 2px #22c55e" : "0 1px 4px rgba(0,0,0,0.07)", position: "relative" }}>
                     {isCheapest && (
@@ -263,7 +287,7 @@ export default function Home() {
                     )}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s["Rótulo"]}</p>
+                        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.Rótulo}</p>
                         <p style={{ margin: 0, fontSize: 11, color: "#94a3b8" }}>{s.Municipio}{dist ? ` · ${dist.toFixed(1)} km` : ""}</p>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -278,10 +302,18 @@ export default function Home() {
                           )}
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <button onClick={() => toggleFav(s.IDEESS)} style={{ background: isFav ? "#fef3c7" : "#f8fafc", border: "none", borderRadius: 8, padding: 6, cursor: "pointer" }}>
+                          <button
+                            onClick={() => toggleFav(s.IDEESS)}
+                            style={{ background: isFav ? "#fef3c7" : "#f8fafc", border: "none", borderRadius: 8, padding: 6, cursor: "pointer" }}
+                          >
                             <Star size={16} fill={isFav ? "#f59e0b" : "none"} color={isFav ? "#f59e0b" : "#94a3b8"} />
                           </button>
-                          <a href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`} target="_blank" style={{ background: "#0ea5e9", borderRadius: 8, padding: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <a
+                            href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ background: "#0ea5e9", borderRadius: 8, padding: 6, display: "flex", alignItems: "center", justifyContent: "center" }}
+                          >
                             <Navigation size={14} color="white" />
                           </a>
                         </div>
@@ -294,7 +326,7 @@ export default function Home() {
           )
         )}
 
-        {/* FAVS */}
+        {/* FAVS VIEW */}
         {view === "favs" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {favStations.length === 0 ? (
@@ -313,15 +345,17 @@ export default function Home() {
                   <div key={i} style={{ background: "white", borderRadius: 14, padding: "12px 14px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "#1e293b" }}>{s["Rótulo"]}</p>
+                        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "#1e293b" }}>{s.Rótulo}</p>
                         <p style={{ margin: 0, fontSize: 11, color: "#94a3b8" }}>{s.Municipio}{dist ? ` · ${dist.toFixed(1)} km` : ""}</p>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <p style={{ margin: 0, fontWeight: 900, fontSize: 20, color: "#0ea5e9" }}>{price ? `${price.toFixed(3)}€` : "N/A"}</p>
+                        <p style={{ margin: 0, fontWeight: 900, fontSize: 20, color: "#0ea5e9" }}>
+                          {price ? `${price.toFixed(3)}€` : "N/A"}
+                        </p>
                         <button onClick={() => toggleFav(s.IDEESS)} style={{ background: "#fef3c7", border: "none", borderRadius: 8, padding: 6, cursor: "pointer" }}>
                           <Star size={16} fill="#f59e0b" color="#f59e0b" />
                         </button>
-                        <a href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`} target="_blank" style={{ background: "#0ea5e9", borderRadius: 8, padding: 6, display: "flex" }}>
+                        <a href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`} target="_blank" rel="noreferrer" style={{ background: "#0ea5e9", borderRadius: 8, padding: 6, display: "flex" }}>
                           <Navigation size={14} color="white" />
                         </a>
                       </div>
@@ -333,7 +367,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* MAP */}
+        {/* MAP VIEW */}
         {view === "map" && (
           <div>
             <p style={{ margin: "0 0 8px", fontSize: 11, color: "#64748b", textAlign: "center" }}>
@@ -343,16 +377,22 @@ export default function Home() {
           </div>
         )}
 
-        {/* CALC */}
+        {/* CALC VIEW */}
         {view === "calc" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ background: "white", borderRadius: 14, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.07)" }}>
               <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 800, color: "#1e293b" }}>🧮 Calculadora de Ahorro Anual</h3>
+
               <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>Litros por llenado</label>
               <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "6px 0 14px" }}>
-                <input type="range" min={10} max={100} value={calcLiters} onChange={(e) => setCalcLiters(Number(e.target.value))} style={{ flex: 1, accentColor: "#0ea5e9" }} />
+                <input
+                  type="range" min={10} max={100} value={calcLiters}
+                  onChange={(e) => setCalcLiters(Number(e.target.value))}
+                  style={{ flex: 1, accentColor: "#0ea5e9" }}
+                />
                 <span style={{ fontWeight: 700, fontSize: 16, color: "#0ea5e9", minWidth: 48, textAlign: "right" }}>{calcLiters}L</span>
               </div>
+
               <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>Llenados al mes</label>
               <div style={{ display: "flex", gap: 8, margin: "6px 0 14px" }}>
                 {[1, 2, 3, 4].map((n) => (
@@ -362,12 +402,13 @@ export default function Home() {
                   </button>
                 ))}
               </div>
+
               <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 12, padding: 14 }}>
                 <p style={{ margin: "0 0 4px", fontSize: 11, color: "#16a34a", fontWeight: 600 }}>COMBUSTIBLE: {fuelLabel}</p>
                 {minPrice && maxPrice ? (
                   <>
                     <p style={{ margin: "0 0 8px", fontSize: 12, color: "#374151" }}>
-                      Más barata: <b style={{ color: "#16a34a" }}>{minPrice.toFixed(3)}€/L</b> {cheapestStation ? `(${cheapestStation["Rótulo"]})` : ""}
+                      Más barata: <b style={{ color: "#16a34a" }}>{minPrice.toFixed(3)}€/L</b> {cheapestStation ? `(${cheapestStation.Rótulo})` : ""}
                     </p>
                     <div style={{ display: "flex", gap: 10 }}>
                       <div style={{ flex: 1, background: "white", borderRadius: 10, padding: 12, textAlign: "center", border: "1px solid #bbf7d0" }}>
@@ -391,6 +432,7 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Per-station savings */}
             {avgPrice && (
               <div style={{ background: "white", borderRadius: 14, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.07)" }}>
                 <h3 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 800, color: "#1e293b" }}>Ahorro por estación vs precio medio</h3>
@@ -402,7 +444,7 @@ export default function Home() {
                   return (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #f1f5f9" }}>
                       <div>
-                        <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: "#1e293b" }}>{s["Rótulo"]}</p>
+                        <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: "#1e293b" }}>{s.Rótulo}</p>
                         <p style={{ margin: 0, fontSize: 10, color: "#94a3b8" }}>{s.Municipio}</p>
                       </div>
                       <span style={{ fontWeight: 800, fontSize: 14, color: saving > 0 ? "#16a34a" : "#ef4444" }}>
