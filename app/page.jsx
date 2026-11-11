@@ -58,11 +58,11 @@ export default function Home() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
-  // Filtrado y Ordenación COMBINADA (Distancia + Precio de menor a mayor)
+  // Filtrado y Ordenación ESTRICTA POR PRECIO (De más barata a más cara)
   const filteredStations = useMemo(() => {
     let list = [...stations];
     
-    // 1. Filtrar estaciones que tengan precio válido para el tipo de combustible seleccionado
+    // 1. Filtrar estaciones que tengan precio válido para el combustible seleccionado
     list = list.filter((s) => {
       const p = parseFloat(s[fuelType]?.replace(",", "."));
       return p && !isNaN(p);
@@ -77,31 +77,15 @@ export default function Home() {
       );
     }
 
-    // 3. Ordenación combinada
+    // 3. Ordenar siempre de menor a mayor precio matemático
     list.sort((a, b) => {
       const precioA = parseFloat(a[fuelType]?.replace(",", ".")) || 9999;
       const precioB = parseFloat(b[fuelType]?.replace(",", ".")) || 9999;
-
-      if (userLocation) {
-        const distA = getDistance(a) || 999;
-        const distB = getDistance(b) || 999;
-
-        // Agrupamos en bloques de cercanía de 5 km
-        const bloqueA = Math.floor(distA / 5);
-        const bloqueB = Math.floor(distB / 5);
-
-        // Si están en diferentes bloques de km, van primero las más cercanas
-        if (bloqueA !== bloqueB) {
-          return distA - distB;
-        }
-      }
-
-      // Dentro del mismo rango de distancia (o si no hay ubicación), se ordena de la más barata a la más cara
       return precioA - precioB;
     });
 
     return list.slice(0, 80);
-  }, [search, stations, userLocation, fuelType]);
+  }, [search, stations, fuelType]);
 
   // Init map when switching to map view
   useEffect(() => {
@@ -224,7 +208,7 @@ export default function Home() {
             <Navigation size={16} /> ACTIVAR UBICACIÓN
           </button>
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Ubicación activada (Ordenado por cercanía y precio)</p>
+          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Ubicación activada (Mostrando precios más baratos)</p>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -292,66 +276,3 @@ export default function Home() {
                 const price = parseFloat(s[fuelType]?.replace(",", ".")) || null;
                 const isFav = favorites.includes(s.IDEESS);
                 const dist = getDistance(s);
-                const isCheapest = price === minPrice;
-
-                return (
-                  <div key={i} style={{ background: "white", borderRadius: 14, padding: "12px 14px", boxShadow: isCheapest ? "0 0 0 2px #22c55e" : "0 1px 4px rgba(0,0,0,0.07)", position: "relative" }}>
-                    {isCheapest && (
-                      <span style={{ position: "absolute", top: -8, left: 12, background: "#22c55e", color: "white", fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>
-                        MÁS BARATA 🏆
-                      </span>
-                    )}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.Rótulo}</p>
-                        <p style={{ margin: 0, fontSize: 11, color: "#94a3b8" }}>{s.Municipio}{dist ? ` · ${dist.toFixed(1)} km` : ""}</p>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ textAlign: "right" }}>
-                          <p style={{ margin: 0, fontWeight: 900, fontSize: 20, color: price === minPrice ? "#22c55e" : price === maxPrice ? "#ef4444" : "#0ea5e9" }}>
-                            {price ? `${price.toFixed(3)}€` : "N/A"}
-                          </p>
-                          {price && avgPrice && (
-                            <p style={{ margin: 0, fontSize: 10, color: price < avgPrice ? "#22c55e" : "#ef4444", fontWeight: 600 }}>
-                              {price < avgPrice ? `${((avgPrice - price) * 1000).toFixed(0)}‰ bajo media` : `${((price - avgPrice) * 1000).toFixed(0)}‰ sobre media`}
-                            </p>
-                          )}
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <button
-                            onClick={() => toggleFav(s.IDEESS)}
-                            style={{ background: isFav ? "#fef3c7" : "#f8fafc", border: "none", borderRadius: 8, padding: 6, cursor: "pointer" }}
-                          >
-                            <Star size={16} fill={isFav ? "#f59e0b" : "none"} color={isFav ? "#f59e0b" : "#94a3b8"} />
-                          </button>
-                          <a
-                            href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={{ background: "#0ea5e9", borderRadius: 8, padding: 6, display: "flex", alignItems: "center", justifyContent: "center" }}
-                          >
-                            <Navigation size={14} color="white" />
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )
-        )}
-
-        {/* FAVS VIEW */}
-        {view === "favs" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {favStations.length === 0 ? (
-              <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>
-                <Star size={32} style={{ marginBottom: 8, opacity: 0.3 }} />
-                <p>Aún no tienes favoritos.</p>
-                <p style={{ fontSize: 12 }}>Pulsa ⭐ en cualquier estación.</p>
-              </div>
-            ) : (
-              favStations.map((s, i) => {
-                const lat = s.Latitud?.replace(",", ".");
-                const lng = s["Longitud (W
