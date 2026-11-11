@@ -59,16 +59,10 @@ export default function Home() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
-  // Filtrado inteligente: Cerca de ti (radio de 15km) ordenadas de más barata a más cara
+  // ORDENACIÓN Híbrida: Prioriza cercanía pero coloca la más barata primero en tu zona
   const filteredStations = useMemo(() => {
     let list = [...stations];
     
-    // Si el usuario ha activado la ubicación, filtramos primero un radio cercano (ej. 15 km) para que no salga toda España
-    if (userLocation) {
-      list = list.map((s) => ({ ...s, _dist: getDistance(s) }))
-                 .filter((s) => s._dist !== null && s._dist <= 15);
-    }
-
     if (search) {
       list = list.filter(
         (s) =>
@@ -77,10 +71,24 @@ export default function Home() {
       );
     }
 
-    // Ordenar estrictamente de menor a mayor precio dentro de las cercanas
     list.sort((a, b) => {
       const precioA = parseFloat(a[fuelType]?.replace(",", ".")) || 9999;
       const precioB = parseFloat(b[fuelType]?.replace(",", ".")) || 9999;
+
+      if (userLocation) {
+        const distA = getDistance(a) ?? 999;
+        const distB = getDistance(b) ?? 999;
+
+        // Si están en un radio cercano (menos de 10 km entre ellas), el PRECIO manda por completo
+        if (distA <= 15 && distB <= 15) {
+          return precioA - precioB;
+        }
+
+        // Si una está muy lejos comparada con la otra, priorizamos la cercanía
+        return distA - distB;
+      }
+
+      // Si no hay ubicación activa, ordena puramente por precio de menor a mayor
       return precioA - precioB;
     });
 
@@ -208,7 +216,7 @@ export default function Home() {
             <Navigation size={16} /> ACTIVAR UBICACIÓN
           </button>
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Cerca de ti (<span style={{color: "#22c55e", fontWeight: "bold"}}>Ordenado de más barata a más cara</span>)</p>
+          <p style={{ margin: 0, fontSize: 12, color: "#16a34a", textAlign: "center", fontWeight: "bold" }}>🏆 Ordenado por PRECIO (más baratas de tu zona primero)</p>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -275,8 +283,8 @@ export default function Home() {
                 const lng = s["Longitud (WGS84)"]?.replace(",", ".");
                 const price = parseFloat(s[fuelType]?.replace(",", ".")) || null;
                 const isFav = favorites.includes(s.IDEESS);
-                const dist = s._dist !== undefined ? s._dist : getDistance(s);
-                const isCheapest = i === 0; // La primera siempre es la más barata de tu zona
+                const dist = getDistance(s);
+                const isCheapest = i === 0;
 
                 return (
                   <div key={i} style={{ background: "white", borderRadius: 14, padding: "12px 14px", boxShadow: isCheapest ? "0 0 0 2px #22c55e" : "0 1px 4px rgba(0,0,0,0.07)", position: "relative" }}>
