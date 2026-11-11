@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, Fragment } from "react";
 import { Navigation, Star, Map, List, Calculator, Fuel } from "lucide-react";
 
 // Leaflet loaded via CDN in useEffect
@@ -17,6 +17,7 @@ export default function Home() {
   const [fuelType, setFuelType] = useState("Precio Gasolina 95 E5");
   const [favorites, setFavorites] = useState([]);
   const [view, setView] = useState("list"); // list | favs | map | calc
+  const [sortMode, setSortMode] = useState("price"); // price | near
   const [calcLiters, setCalcLiters] = useState(50);
   const [calcFreq, setCalcFreq] = useState(2);
   const mapRef = useRef(null);
@@ -85,7 +86,7 @@ export default function Home() {
       .filter((x) => !isNaN(x.price)); // fuera las que no tienen ese combustible
 
     withData.sort((a, b) => {
-      if (userLocation) {
+      if (userLocation && sortMode === "near") {
         const bandA = Math.floor((a.dist ?? 9999) / BAND_KM);
         const bandB = Math.floor((b.dist ?? 9999) / BAND_KM);
         if (bandA !== bandB) return bandA - bandB; // 1º: más cerca
@@ -94,7 +95,7 @@ export default function Home() {
     });
 
     return withData.slice(0, 80).map((x) => x.s);
-  }, [search, stations, userLocation, fuelType]);
+  }, [search, stations, userLocation, fuelType, sortMode]);
 
   // Init map when switching to map view
   useEffect(() => {
@@ -217,7 +218,17 @@ export default function Home() {
             <Navigation size={16} /> ACTIVAR UBICACIÓN
           </button>
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: "#16a34a", textAlign: "center", fontWeight: "bold" }}>📍 Ordenado por CERCANÍA y, dentro de cada tramo, por precio</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[
+              { id: "price", label: "💶 Más barata primero" },
+              { id: "near", label: "📍 Más cerca primero" },
+            ].map((m) => (
+              <button key={m.id} onClick={() => setSortMode(m.id)}
+                style={{ flex: 1, padding: "9px 4px", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: "pointer", background: sortMode === m.id ? "#0ea5e9" : "#f1f5f9", color: sortMode === m.id ? "white" : "#64748b" }}>
+                {m.label}
+              </button>
+            ))}
+          </div>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -286,9 +297,19 @@ export default function Home() {
                 const isFav = favorites.includes(s.IDEESS);
                 const dist = getDistance(s);
                 const isCheapest = price !== null && price === minPrice;
+                const band = dist !== null ? Math.floor(dist / BAND_KM) : null;
+                const prevDist = i > 0 ? getDistance(filteredStations[i - 1]) : null;
+                const prevBand = prevDist !== null ? Math.floor(prevDist / BAND_KM) : null;
+                const showHeader = userLocation && sortMode === "near" && band !== null && (i === 0 || band !== prevBand);
 
                 return (
-                  <div key={i} style={{ background: "white", borderRadius: 14, padding: "12px 14px", boxShadow: isCheapest ? "0 0 0 2px #22c55e" : "0 1px 4px rgba(0,0,0,0.07)", position: "relative" }}>
+                  <Fragment key={i}>
+                  {showHeader && (
+                    <p style={{ margin: "8px 0 0", fontSize: 12, fontWeight: 800, color: "#0369a1" }}>
+                      {band === 0 ? `Hasta ${BAND_KM} km` : `De ${band * BAND_KM} a ${(band + 1) * BAND_KM} km`} · de más barata a más cara
+                    </p>
+                  )}
+                  <div style={{ background: "white", borderRadius: 14, padding: "12px 14px", boxShadow: isCheapest ? "0 0 0 2px #22c55e" : "0 1px 4px rgba(0,0,0,0.07)", position: "relative" }}>
                     {isCheapest && (
                       <span style={{ position: "absolute", top: -8, left: 12, background: "#22c55e", color: "white", fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>
                         MÁS BARATA DE TU ZONA 🏆
@@ -329,6 +350,7 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
+                  </Fragment>
                 );
               })}
             </div>
