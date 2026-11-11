@@ -51,6 +51,7 @@ export default function Home() {
     if (!userLocation) return null;
     const lat = parseFloat(s.Latitud?.replace(",", "."));
     const lng = parseFloat(s["Longitud (WGS84)"]?.replace(",", "."));
+    if (!lat || !lng) return 999;
     const R = 6371;
     const dLat = ((lat - userLocation.lat) * Math.PI) / 180;
     const dLng = ((lng - userLocation.lng) * Math.PI) / 180;
@@ -58,7 +59,7 @@ export default function Home() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
-  // Filtrado y Ordenación ESTRICTA POR PRECIO (De más barata a más cara)
+  // Filtrado y Ordenación COMBINADA (Cercanía primero + Precio más bajo dentro de la zona)
   const filteredStations = useMemo(() => {
     let list = [...stations];
     
@@ -68,7 +69,7 @@ export default function Home() {
       return p && !isNaN(p);
     });
 
-    // 2. Filtrar por búsqueda si el usuario escribe un municipio o marca
+    // 2. Filtrar por búsqueda de texto (municipio o marca) si se usa
     if (search) {
       list = list.filter(
         (s) =>
@@ -77,15 +78,31 @@ export default function Home() {
       );
     }
 
-    // 3. Ordenar siempre de menor a mayor precio matemático
+    // 3. Ordenación inteligente: Cercanía prioritaria agrupada y menor precio
     list.sort((a, b) => {
       const precioA = parseFloat(a[fuelType]?.replace(",", ".")) || 9999;
       const precioB = parseFloat(b[fuelType]?.replace(",", ".")) || 9999;
+
+      if (userLocation) {
+        const distA = getDistance(a);
+        const distB = getDistance(b);
+
+        // Agrupamos por bloques de cercanía de 8 km
+        const bloqueA = Math.floor(distA / 8);
+        const bloqueB = Math.floor(distB / 8);
+
+        // Si están en diferentes bloques de distancia, prioriza la zona más cercana
+        if (bloqueA !== bloqueB) {
+          return bloqueA - bloqueB;
+        }
+      }
+
+      // Dentro del mismo radio cercano, ordena estrictamente de la más barata a la más cara
       return precioA - precioB;
     });
 
     return list.slice(0, 80);
-  }, [search, stations, fuelType]);
+  }, [search, stations, userLocation, fuelType]);
 
   // Init map when switching to map view
   useEffect(() => {
@@ -126,8 +143,8 @@ export default function Home() {
     const prices = filteredStations
       .map((s) => parseFloat(s[fuelType]?.replace(",", ".")) || null)
       .filter(Boolean);
-    const minP = Math.min(...prices);
-    const maxP = Math.max(...prices);
+    const minP = prices.length ? Math.min(...prices) : 0;
+    const maxP = prices.length ? Math.max(...prices) : 1;
 
     filteredStations.slice(0, 100).forEach((s) => {
       const lat = parseFloat(s.Latitud?.replace(",", "."));
@@ -208,7 +225,7 @@ export default function Home() {
             <Navigation size={16} /> ACTIVAR UBICACIÓN
           </button>
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Ubicación activada (Mostrando precios más baratos)</p>
+          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Ubicación activa (Cercanía + Precio más barato)</p>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -276,3 +293,188 @@ export default function Home() {
                 const price = parseFloat(s[fuelType]?.replace(",", ".")) || null;
                 const isFav = favorites.includes(s.IDEESS);
                 const dist = getDistance(s);
+                const isCheapest = price === minPrice;
+
+                return (
+                  <div key={i} style={{ background: "white", borderRadius: 14, padding: "12px 14px", boxShadow: isCheapest ? "0 0 0 2px #22c55e" : "0 1px 4px rgba(0,0,0,0.07)", position: "relative" }}>
+                    {isCheapest && (
+                      <span style={{ position: "absolute", top: -8, left: 12, background: "#22c55e", color: "white", fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>
+                        MÁS BARATA 🏆
+                      </span>
+                    )}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.Rótulo}</p>
+                        <p style={{ margin: 0, fontSize: 11, color: "#94a3b8" }}>{s.Municipio}{dist !== null ? ` · ${dist.toFixed(1)} km` : ""}</p>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ textAlign: "right" }}>
+                          <p style={{ margin: 0, fontWeight: 900, fontSize: 20, color: price === minPrice ? "#22c55e" : price === maxPrice ? "#ef4444" : "#0ea5e9" }}>
+                            {price ? `${price.toFixed(3)}€` : "N/A"}
+                          </p>
+                          {price && avgPrice && (
+                            <p style={{ margin: 0, fontSize: 10, color: price < avgPrice ? "#22c55e" : "#ef4444", fontWeight: 600 }}>
+                              {price < avgPrice ? `${((avgPrice - price) * 1000).toFixed(0)}‰ bajo media` : `${((price - avgPrice) * 1000).toFixed(0)}‰ sobre media`}
+                            </p>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <button
+                            onClick={() => toggleFav(s.IDEESS)}
+                            style={{ background: isFav ? "#fef3c7" : "#f8fafc", border: "none", borderRadius: 8, padding: 6, cursor: "pointer" }}
+                          >
+                            <Star size={16} fill={isFav ? "#f59e0b" : "none"} color={isFav ? "#f59e0b" : "#94a3b8"} />
+                          </button>
+                          <a
+                            href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ background: "#0ea5e9", borderRadius: 8, padding: 6, display: "flex", alignItems: "center", justifyContent: "center" }}
+                          >
+                            <Navigation size={14} color="white" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+
+        {/* FAVS VIEW */}
+        {view === "favs" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {favStations.length === 0 ? (
+              <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>
+                <Star size={32} style={{ marginBottom: 8, opacity: 0.3 }} />
+                <p>Aún no tienes favoritos.</p>
+                <p style={{ fontSize: 12 }}>Pulsa ⭐ en cualquier estación.</p>
+              </div>
+            ) : (
+              favStations.map((s, i) => {
+                const lat = s.Latitud?.replace(",", ".");
+                const lng = s["Longitud (WGS84)"]?.replace(",", ".");
+                const price = parseFloat(s[fuelType]?.replace(",", ".")) || null;
+                const dist = getDistance(s);
+                return (
+                  <div key={i} style={{ background: "white", borderRadius: 14, padding: "12px 14px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ margin: 0, fontWeight: 700, fontSize: 13, color: "#1e293b" }}>{s.Rótulo}</p>
+                        <p style={{ margin: 0, fontSize: 11, color: "#94a3b8" }}>{s.Municipio}{dist !== null ? ` · ${dist.toFixed(1)} km` : ""}</p>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <p style={{ margin: 0, fontWeight: 900, fontSize: 20, color: "#0ea5e9" }}>
+                          {price ? `${price.toFixed(3)}€` : "N/A"}
+                        </p>
+                        <button onClick={() => toggleFav(s.IDEESS)} style={{ background: "#fef3c7", border: "none", borderRadius: 8, padding: 6, cursor: "pointer" }}>
+                          <Star size={16} fill="#f59e0b" color="#f59e0b" />
+                        </button>
+                        <a href={`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`} target="_blank" rel="noreferrer" style={{ background: "#0ea5e9", borderRadius: 8, padding: 6, display: "flex" }}>
+                          <Navigation size={14} color="white" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* MAP VIEW */}
+        {view === "map" && (
+          <div>
+            <p style={{ margin: "0 0 8px", fontSize: 11, color: "#64748b", textAlign: "center" }}>
+              Verde = barato · Rojo = caro · Toca un pin para más info
+            </p>
+            <div ref={mapRef} style={{ width: "100%", height: 480, borderRadius: 14, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.1)" }} />
+          </div>
+        )}
+
+        {/* CALC VIEW */}
+        {view === "calc" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ background: "white", borderRadius: 14, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.07)" }}>
+              <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 800, color: "#1e293b" }}>🧮 Calculadora de Ahorro Anual</h3>
+
+              <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>Litros por llenado</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "6px 0 14px" }}>
+                <input
+                  type="range" min={10} max={100} value={calcLiters}
+                  onChange={(e) => setCalcLiters(Number(e.target.value))}
+                  style={{ flex: 1, accentColor: "#0ea5e9" }}
+                />
+                <span style={{ fontWeight: 700, fontSize: 16, color: "#0ea5e9", minWidth: 48, textAlign: "right" }}>{calcLiters}L</span>
+              </div>
+
+              <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>Llenados al mes</label>
+              <div style={{ display: "flex", gap: 8, margin: "6px 0 14px" }}>
+                {[1, 2, 3, 4].map((n) => (
+                  <button key={n} onClick={() => setCalcFreq(n)}
+                    style={{ flex: 1, padding: "10px 0", border: "none", borderRadius: 10, background: calcFreq === n ? "#0ea5e9" : "#f1f5f9", color: calcFreq === n ? "white" : "#64748b", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                    {n}x
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 12, padding: 14 }}>
+                <p style={{ margin: "0 0 4px", fontSize: 11, color: "#16a34a", fontWeight: 600 }}>COMBUSTIBLE: {fuelLabel}</p>
+                {minPrice && maxPrice ? (
+                  <>
+                    <p style={{ margin: "0 0 8px", fontSize: 12, color: "#374151" }}>
+                      Más barata: <b style={{ color: "#16a34a" }}>{minPrice.toFixed(3)}€/L</b> {cheapestStation ? `(${cheapestStation.Rótulo})` : ""}
+                    </p>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ flex: 1, background: "white", borderRadius: 10, padding: 12, textAlign: "center", border: "1px solid #bbf7d0" }}>
+                        <p style={{ margin: 0, fontSize: 10, color: "#6b7280" }}>vs más cara</p>
+                        <p style={{ margin: "4px 0 0", fontSize: 26, fontWeight: 900, color: "#16a34a" }}>{savingsVsMax}€</p>
+                        <p style={{ margin: 0, fontSize: 10, color: "#6b7280" }}>al año</p>
+                      </div>
+                      <div style={{ flex: 1, background: "white", borderRadius: 10, padding: 12, textAlign: "center", border: "1px solid #bbf7d0" }}>
+                        <p style={{ margin: 0, fontSize: 10, color: "#6b7280" }}>vs precio medio</p>
+                        <p style={{ margin: "4px 0 0", fontSize: 26, fontWeight: 900, color: "#0ea5e9" }}>{savingsVsAvg}€</p>
+                        <p style={{ margin: 0, fontSize: 10, color: "#6b7280" }}>al año</p>
+                      </div>
+                    </div>
+                    <p style={{ margin: "10px 0 0", fontSize: 11, color: "#6b7280", textAlign: "center" }}>
+                      Basado en {filteredStations.length} estaciones · {calcLiters}L × {calcFreq}x/mes
+                    </p>
+                  </>
+                ) : (
+                  <p style={{ color: "#6b7280", fontSize: 13 }}>Cargando datos de precios...</p>
+                )}
+              </div>
+            </div>
+
+            {/* Per-station savings */}
+            {avgPrice && (
+              <div style={{ background: "white", borderRadius: 14, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.07)" }}>
+                <h3 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 800, color: "#1e293b" }}>Ahorro por estación vs precio medio</h3>
+                {filteredStations.slice(0, 10).map((s, i) => {
+                  const price = parseFloat(s[fuelType]?.replace(",", ".")) || null;
+                  if (!price) return null;
+                  const annualSaving = ((avgPrice - price) * calcLiters * calcFreq * 12).toFixed(0);
+                  const saving = Number(annualSaving);
+                  return (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #f1f5f9" }}>
+                      <div>
+                        <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: "#1e293b" }}>{s.Rótulo}</p>
+                        <p style={{ margin: 0, fontSize: 10, color: "#94a3b8" }}>{s.Municipio}</p>
+                      </div>
+                      <span style={{ fontWeight: 800, fontSize: 14, color: saving > 0 ? "#16a34a" : "#ef4444" }}>
+                        {saving > 0 ? `+${annualSaving}€` : `${annualSaving}€`}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
