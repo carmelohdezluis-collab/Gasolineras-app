@@ -96,7 +96,7 @@ export default function Home() {
       return a.price - b.price;                    // dentro del radio: más barata primero
     });
 
-    return withData.slice(0, 80).map((x) => x.s);
+    return withData.slice(0, 200).map((x) => x.s);
   }, [search, stations, userLocation, fuelType, radius, sortMode]);
 
   // Init map when switching to map view
@@ -186,6 +186,26 @@ export default function Home() {
   const savingsVsMax = maxPrice && minPrice ? ((maxPrice - minPrice) * calcLiters * calcFreq * 12).toFixed(2) : null;
   const savingsVsAvg = avgPrice && minPrice ? ((avgPrice - minPrice) * calcLiters * calcFreq * 12).toFixed(2) : null;
   const cheapestStation = filteredStations.find((s) => parseFloat(s[fuelType]?.replace(",", ".")) === minPrice);
+
+  // Tramos de distancia: la más barata de cada tramo se marca con recuadro verde
+  const TIERS = [5, 10, 15, 25, 50, Infinity];
+  const tierOf = (d) => (d === null ? -1 : TIERS.findIndex((t) => d <= t));
+  const tierLabel = (t) =>
+    t === 0 ? "A MENOS DE 5 KM"
+    : t === TIERS.length - 1 ? `A MÁS DE ${TIERS[t - 1]} KM`
+    : `DE ${TIERS[t - 1]} A ${TIERS[t]} KM`;
+
+  const cheapestByTier = useMemo(() => {
+    const best = {};
+    filteredStations.forEach((s) => {
+      const price = parseFloat(s[fuelType]?.replace(",", "."));
+      if (isNaN(price)) return;
+      const t = tierOf(getDistance(s));
+      if (t < 0) return;
+      if (!(t in best) || price < best[t].price) best[t] = { id: s.IDEESS, price };
+    });
+    return best;
+  }, [filteredStations, userLocation, fuelType]);
 
   const updateLocation = () => {
     if (navigator.geolocation) {
@@ -310,7 +330,11 @@ export default function Home() {
                 const price = parseFloat(s[fuelType]?.replace(",", ".")) || null;
                 const isFav = favorites.includes(s.IDEESS);
                 const dist = getDistance(s);
-                const isCheapest = price !== null && price === minPrice;
+                const tier = tierOf(dist);
+                const isCheapest = userLocation
+                  ? tier >= 0 && cheapestByTier[tier]?.id === s.IDEESS
+                  : price !== null && price === minPrice;
+                const badgeText = userLocation ? `MÁS BARATA ${tierLabel(tier)} 🏆` : "MÁS BARATA DE TU ZONA 🏆";
                 const inside = dist !== null && (radius === 0 || dist <= radius);
                 const prevDist = i > 0 ? getDistance(filteredStations[i - 1]) : null;
                 const prevInside = prevDist !== null && (radius === 0 || prevDist <= radius);
@@ -328,7 +352,7 @@ export default function Home() {
                   <div style={{ background: "white", borderRadius: 14, padding: "12px 14px", boxShadow: isCheapest ? "0 0 0 2px #22c55e" : "0 1px 4px rgba(0,0,0,0.07)", position: "relative" }}>
                     {isCheapest && (
                       <span style={{ position: "absolute", top: -8, left: 12, background: "#22c55e", color: "white", fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>
-                        MÁS BARATA DE TU ZONA 🏆
+                        {badgeText}
                       </span>
                     )}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
