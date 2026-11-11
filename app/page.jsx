@@ -59,10 +59,16 @@ export default function Home() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
-  // Filtrado y Ordenación por Cercanía + Precio más bajo
+  // Filtrado inteligente: Cerca de ti (radio de 15km) ordenadas de más barata a más cara
   const filteredStations = useMemo(() => {
     let list = [...stations];
     
+    // Si el usuario ha activado la ubicación, filtramos primero un radio cercano (ej. 15 km) para que no salga toda España
+    if (userLocation) {
+      list = list.map((s) => ({ ...s, _dist: getDistance(s) }))
+                 .filter((s) => s._dist !== null && s._dist <= 15);
+    }
+
     if (search) {
       list = list.filter(
         (s) =>
@@ -71,23 +77,10 @@ export default function Home() {
       );
     }
 
+    // Ordenar estrictamente de menor a mayor precio dentro de las cercanas
     list.sort((a, b) => {
       const precioA = parseFloat(a[fuelType]?.replace(",", ".")) || 9999;
       const precioB = parseFloat(b[fuelType]?.replace(",", ".")) || 9999;
-
-      if (userLocation) {
-        const distA = getDistance(a) ?? 999;
-        const distB = getDistance(b) ?? 999;
-
-        // Si la diferencia de distancia es menor de 6 km, priorizamos el precio más barato entre ambas
-        if (Math.abs(distA - distB) < 6) {
-          return precioA - precioB;
-        }
-        // Si hay una diferencia clara de distancia, priorizamos la más cercana
-        return distA - distB;
-      }
-
-      // Si no hay ubicación activa, se ordena estrictamente de la más barata a la más cara
       return precioA - precioB;
     });
 
@@ -215,7 +208,7 @@ export default function Home() {
             <Navigation size={16} /> ACTIVAR UBICACIÓN
           </button>
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Ubicación activa (Cercanía y mejor precio optimizado)</p>
+          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Cerca de ti (<span style={{color: "#22c55e", fontWeight: "bold"}}>Ordenado de más barata a más cara</span>)</p>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -282,14 +275,14 @@ export default function Home() {
                 const lng = s["Longitud (WGS84)"]?.replace(",", ".");
                 const price = parseFloat(s[fuelType]?.replace(",", ".")) || null;
                 const isFav = favorites.includes(s.IDEESS);
-                const dist = getDistance(s);
-                const isCheapest = price === minPrice;
+                const dist = s._dist !== undefined ? s._dist : getDistance(s);
+                const isCheapest = i === 0; // La primera siempre es la más barata de tu zona
 
                 return (
                   <div key={i} style={{ background: "white", borderRadius: 14, padding: "12px 14px", boxShadow: isCheapest ? "0 0 0 2px #22c55e" : "0 1px 4px rgba(0,0,0,0.07)", position: "relative" }}>
                     {isCheapest && (
                       <span style={{ position: "absolute", top: -8, left: 12, background: "#22c55e", color: "white", fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>
-                        MÁS BARATA 🏆
+                        MÁS BARATA DE TU ZONA 🏆
                       </span>
                     )}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -299,7 +292,7 @@ export default function Home() {
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <div style={{ textAlign: "right" }}>
-                          <p style={{ margin: 0, fontWeight: 900, fontSize: 20, color: price === minPrice ? "#22c55e" : price === maxPrice ? "#ef4444" : "#0ea5e9" }}>
+                          <p style={{ margin: 0, fontWeight: 900, fontSize: 20, color: isCheapest ? "#22c55e" : price === maxPrice ? "#ef4444" : "#0ea5e9" }}>
                             {price ? `${price.toFixed(3)}€` : "N/A"}
                           </p>
                           {price && avgPrice && (
