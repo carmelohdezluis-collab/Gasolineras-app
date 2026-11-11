@@ -7,7 +7,7 @@ import { Navigation, Star, Map, List, Calculator, Fuel } from "lucide-react";
 let L = null;
 
 // Tamaño del tramo de distancia (km). Dentro de cada tramo se ordena por precio.
-const BAND_KM = 3;
+const BAND_KM = 10;
 
 export default function Home() {
   const [search, setSearch] = useState("");
