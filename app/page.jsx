@@ -15,6 +15,7 @@ export default function Home() {
   const [favorites, setFavorites] = useState([]);
   const [view, setView] = useState("list"); // list | favs | map | calc
   const [radius, setRadius] = useState(15); // km a la redonda; 0 = sin límite
+  const [sortMode, setSortMode] = useState("price"); // price (barata dentro del radio) | near (más cerca primero)
   const [calcLiters, setCalcLiters] = useState(50);
   const [calcFreq, setCalcFreq] = useState(2);
   const mapRef = useRef(null);
@@ -86,6 +87,7 @@ export default function Home() {
       if (userLocation) {
         const dA = a.dist ?? 9999;
         const dB = b.dist ?? 9999;
+        if (sortMode === "near") return dA - dB || a.price - b.price; // estrictamente por distancia
         const inA = radius === 0 || dA <= radius;
         const inB = radius === 0 || dB <= radius;
         if (inA !== inB) return inA ? -1 : 1;      // 1º: las del radio
@@ -95,7 +97,7 @@ export default function Home() {
     });
 
     return withData.slice(0, 80).map((x) => x.s);
-  }, [search, stations, userLocation, fuelType, radius]);
+  }, [search, stations, userLocation, fuelType, radius, sortMode]);
 
   // Init map when switching to map view
   useEffect(() => {
@@ -218,18 +220,28 @@ export default function Home() {
             <Navigation size={16} /> ACTIVAR UBICACIÓN
           </button>
         ) : (
-          <div>
-            <p style={{ margin: "0 0 6px", fontSize: 12, color: "#16a34a", textAlign: "center", fontWeight: "bold" }}>
-              📍 Las de tu zona primero, de más barata a más cara
-            </p>
-            <div style={{ display: "flex", gap: 6 }}>
-              {[5, 10, 15, 25, 50, 0].map((r) => (
-                <button key={r} onClick={() => setRadius(r)}
-                  style={{ flex: 1, padding: "8px 2px", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: "pointer", background: radius === r ? "#0ea5e9" : "#f1f5f9", color: radius === r ? "white" : "#64748b" }}>
-                  {r === 0 ? "Todas" : `${r} km`}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[
+                { id: "near", label: "📍 Más cerca primero" },
+                { id: "price", label: "💶 Más barata en mi zona" },
+              ].map((m) => (
+                <button key={m.id} onClick={() => setSortMode(m.id)}
+                  style={{ flex: 1, padding: "9px 4px", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: "pointer", background: sortMode === m.id ? "#0ea5e9" : "#f1f5f9", color: sortMode === m.id ? "white" : "#64748b" }}>
+                  {m.label}
                 </button>
               ))}
             </div>
+            {sortMode === "price" && (
+              <div style={{ display: "flex", gap: 6 }}>
+                {[5, 10, 15, 25, 50, 0].map((r) => (
+                  <button key={r} onClick={() => setRadius(r)}
+                    style={{ flex: 1, padding: "8px 2px", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: "pointer", background: radius === r ? "#16a34a" : "#f1f5f9", color: radius === r ? "white" : "#64748b" }}>
+                    {r === 0 ? "Todas" : `${r} km`}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         <div style={{ display: "flex", gap: 8 }}>
@@ -302,7 +314,7 @@ export default function Home() {
                 const inside = dist !== null && (radius === 0 || dist <= radius);
                 const prevDist = i > 0 ? getDistance(filteredStations[i - 1]) : null;
                 const prevInside = prevDist !== null && (radius === 0 || prevDist <= radius);
-                const showHeader = userLocation && (i === 0 || inside !== prevInside);
+                const showHeader = userLocation && sortMode === "price" && (i === 0 || inside !== prevInside);
 
                 return (
                   <Fragment key={i}>
