@@ -59,7 +59,7 @@ export default function Home() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
-  // Filtrado y Ordenación por Cercanía (bloques de 5km) y Precio más bajo
+  // Filtrado y Ordenación por Cercanía + Precio más bajo
   const filteredStations = useMemo(() => {
     let list = [...stations];
     
@@ -76,21 +76,18 @@ export default function Home() {
       const precioB = parseFloat(b[fuelType]?.replace(",", ".")) || 9999;
 
       if (userLocation) {
-        const distA = getDistance(a);
-        const distB = getDistance(b);
-        
-        // Si ambas tienen distancia, agrupamos por cercanía (bloques de 5 km)
-        if (distA !== null && distB !== null) {
-          const bloqueA = Math.floor(distA / 5);
-          const bloqueB = Math.floor(distB / 5);
+        const distA = getDistance(a) ?? 999;
+        const distB = getDistance(b) ?? 999;
 
-          if (bloqueA !== bloqueB) {
-            return bloqueA - bloqueB; // Primero las más cercanas
-          }
+        // Si la diferencia de distancia es menor de 6 km, priorizamos el precio más barato entre ambas
+        if (Math.abs(distA - distB) < 6) {
+          return precioA - precioB;
         }
+        // Si hay una diferencia clara de distancia, priorizamos la más cercana
+        return distA - distB;
       }
 
-      // Si están en el mismo rango de cercanía (o no hay ubicación), ordena de más barata a más cara
+      // Si no hay ubicación activa, se ordena estrictamente de la más barata a la más cara
       return precioA - precioB;
     });
 
@@ -218,7 +215,7 @@ export default function Home() {
             <Navigation size={16} /> ACTIVAR UBICACIÓN
           </button>
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Ubicación activa (Cercanía + Mejor precio)</p>
+          <p style={{ margin: 0, fontSize: 12, color: "#0ea5e9", textAlign: "center" }}>📍 Ubicación activa (Cercanía y mejor precio optimizado)</p>
         )}
         <div style={{ display: "flex", gap: 8 }}>
           <input
